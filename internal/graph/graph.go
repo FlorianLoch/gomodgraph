@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"sort"
 	"strings"
 
 	"github.com/goccy/go-graphviz"
@@ -38,13 +39,36 @@ type DependencyVertex struct {
 }
 
 type DependencyGraph struct {
-	modulesMap map[string]*ModuleNode
+	// We need a list and a map: the map in order to allow fast lookups,
+	// the list in order to render deterministic, reproducible graphs
+	// We generate the list from the map as for building the graphs only the map is necessary
+	modulesList []*ModuleNode
+	modulesMap  map[string]*ModuleNode
 
-	isSubgraph bool // Indicates whether a graph is a subgraph or the root graph. Only the root graph contains full information, a subgraph's nodes dependencies are pruned
+	// Indicates whether a graph is a subgraph or the root graph. Only the root graph contains full information,
+	// a subgraph's nodes' dependencies are pruned, deriving subgraphs from subgraphs therefore is not a good idea.
+	isSubgraph bool
+}
+
+func NewDependencyGraph(modulesMap map[string]*ModuleNode, isSubgraph bool) *DependencyGraph {
+	modulesList := make([]*ModuleNode, 0, len(modulesMap))
+
+	for _, module := range modulesMap {
+		modulesList = append(modulesList, module)
+	}
+
+	sort.SliceStable(modulesList, func(i, j int) bool {
+		return modulesList[i].ModuleName < modulesList[j].ModuleName
+	})
+
+	return &DependencyGraph{
+		modulesList: modulesList,
+		modulesMap:  modulesMap,
+		isSubgraph:  isSubgraph,
+	}
 }
 
 func BuildDependencyGraph(modFiles []*modfile.File) *DependencyGraph {
-	// TODO: Add a list storing the moduleNodes in order tto have deterministic generation of graphs
 	modulesMap := make(map[string]*ModuleNode, len(modFiles))
 
 	// Populate data structures, vertices will be added later-on
@@ -97,9 +121,7 @@ func BuildDependencyGraph(modFiles []*modfile.File) *DependencyGraph {
 		}
 	}
 
-	return &DependencyGraph{
-		modulesMap: modulesMap,
-	}
+	return NewDependencyGraph(modulesMap, false)
 }
 
 func (d *DependencyGraph) LookupNode(moduleName string) *ModuleNode {
@@ -107,19 +129,32 @@ func (d *DependencyGraph) LookupNode(moduleName string) *ModuleNode {
 }
 
 func (d *DependencyGraph) SubgraphFrom(centerNode *ModuleNode) *DependencyGraph {
+	if d.isSubgraph {
+		panic("Deriving a subgraph from a subgraph is not recommended")
+	}
+
 	subgraphNodesMap := make(map[string]*ModuleNode)
 
-	centerNode = &(*centerNode)
+	copiedNode := *centerNode
+	centerNode = &copiedNode
 	centerNode.Highlight = true
 
 	subgraphNodesMap[centerNode.ModuleName] = centerNode
 
 	// We copy every required module and prune its dependencies
 	for _, dependency := range centerNode.Requires {
-		subgraphNodesMap[dependency.targetModule.ModuleName] = &ModuleNode{
+		newNode := &ModuleNode{
 			ModuleName:   dependency.targetModule.ModuleName,
 			GoModVersion: dependency.targetModule.GoModVersion,
 		}
+
+		subgraphNodesMap[dependency.targetModule.ModuleName] = newNode
+
+		// We also fix this reference because otherwise subgraphNodesMap would not be complete, i.e. there would be
+		// references to nodes not contained in the map. The reference would point to a node not contained in the map
+		// instead of pointing to the node in the map representing the same module.
+		// The rendering implementation depends on the map being complete.
+		dependency.targetModule = newNode
 	}
 
 	// We copy every module requiring the given center module and prune all dependencies, except the one to the center node
@@ -134,10 +169,7 @@ func (d *DependencyGraph) SubgraphFrom(centerNode *ModuleNode) *DependencyGraph 
 		}
 	}
 
-	return &DependencyGraph{
-		modulesMap: subgraphNodesMap,
-		isSubgraph: true,
-	}
+	return NewDependencyGraph(subgraphNodesMap, true)
 }
 
 func (d *DependencyGraph) RenderSVG(writer io.Writer, goRegistryPrefix string) error {
@@ -153,41 +185,41 @@ func (d *DependencyGraph) RenderSVG(writer io.Writer, goRegistryPrefix string) e
 	graph.SetCenter(true)
 
 	// First, create a lookup map containing all nodes as Graphviz nodes
-	graphNodes := make(map[string]*cgraph.Node)
+	graphNodes := make(map[*ModuleNode]*cgraph.Node)
 
-	for moduleName, moduleNode := range d.modulesMap {
-		n, err := graph.CreateNode(moduleName)
+	for _, moduleNode := range d.modulesList {
+		n, err := graph.CreateNode(moduleNode.ModuleName)
 		if err != nil {
 			return fmt.Errorf("creating Graphviz node: %w", err)
 		}
 
-		n.SetLabel(fmt.Sprintf("%s\n(%s)", strings.TrimPrefix(moduleName, goRegistryPrefix), moduleNode.GoModVersion))
+		n.SetLabel(fmt.Sprintf("%s\n(%s)", strings.TrimPrefix(moduleNode.ModuleName, goRegistryPrefix), moduleNode.GoModVersion))
 
 		// We need to fill the node in order to make the whole box a link
 		n.SetStyle(cgraph.FilledNodeStyle)
-		n.SetFillColor("white")
 
 		if moduleNode.Highlight {
+			n.SetShape(cgraph.EggShape)
 			n.SetColor("crimson")
-			n.SetFontColor("crimson")
-			n.SetShape(cgraph.OctagonShape)
+			n.SetFillColor("goldenrod1")
 		} else {
-			n.SetURL(fmt.Sprintf("/?mod=%s", url.QueryEscape(moduleName)))
+			n.SetURL(fmt.Sprintf("/?mod=%s", url.QueryEscape(moduleNode.ModuleName)))
 			n.SetShape(cgraph.BoxShape)
+			n.SetFillColor("floralwhite")
 		}
 
-		graphNodes[moduleName] = n
+		graphNodes[moduleNode] = n
 	}
 
 	// Second, connect the nodes
-	for moduleName, moduleNode := range d.modulesMap {
+	for _, moduleNode := range d.modulesList {
 		for _, dependency := range moduleNode.Requires {
 			id := fmt.Sprintf("%s:%s:%s",
-				moduleName,
+				moduleNode.ModuleName,
 				dependency.targetModule.ModuleName,
 				dependency.targetVersion)
 
-			e, err := graph.CreateEdge(id, graphNodes[moduleName], graphNodes[dependency.targetModule.ModuleName])
+			e, err := graph.CreateEdge(id, graphNodes[moduleNode], graphNodes[dependency.targetModule])
 			if err != nil {
 				return fmt.Errorf("creating Graphviz edge: %w", err)
 			}
