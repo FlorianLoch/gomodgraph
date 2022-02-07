@@ -3,7 +3,6 @@ module github.com/florianloch/gomodgraph
 go 1.17
 
 require (
-	github.com/go-chi/chi/v5 v5.0.7
 	github.com/goccy/go-graphviz v0.0.9
 	github.com/rs/zerolog v1.26.1
 	github.com/xanzy/go-gitlab v0.54.4

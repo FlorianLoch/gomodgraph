@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"flag"
 	"fmt"
 	"net"
@@ -9,7 +8,6 @@ import (
 	"net/url"
 	"os"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/xanzy/go-gitlab"
@@ -20,13 +18,13 @@ import (
 
 // TODO: Annotate module with the latest version, allows indication whether a used version is outdated
 // TODO: Consider "Replace" directive in go.mod
-// TODO: Add CLI flag to clean cache
 // TODO: Add route parameter to request PNG instead of SVG
 
 const (
-	glTokenEnvVar    = "GITLAB_API_TOKEN"
-	glBaseURLEnvVar  = "GITLAB_BASE_URL"
-	downloadLocation = "/tmp/gomodgraph/"
+	glTokenEnvVar   = "GITLAB_API_TOKEN"
+	glBaseURLEnvVar = "GITLAB_BASE_URL"
+	tmpDir          = "/tmp/gomodgraph/"
+	goModDir        = tmpDir + "go_mod_files" // has to be below tmpDir
 )
 
 type config struct {
@@ -34,6 +32,7 @@ type config struct {
 	glBaseURL        string
 	homeModule       string
 	goRegistryPrefix string
+	cleanup          bool
 }
 
 func main() {
@@ -41,72 +40,46 @@ func main() {
 
 	cfg := configure()
 
+	if cfg.cleanup {
+		if err := os.RemoveAll(tmpDir); err != nil && !os.IsNotExist(err) {
+			log.Error().Msgf("Failed to remove the tmp dir (%q): %v", tmpDir, err)
+		}
+	}
+
 	glClient, err := gitlab.NewClient(cfg.glToken, gitlab.WithBaseURL(cfg.glBaseURL))
 	if err != nil {
 		log.Fatal().Msgf("Initializing GitLab client: %v", err)
 	}
 
-	if err := os.Mkdir(downloadLocation, 0o700); err != nil {
-		if !os.IsExist(err) {
-			log.Fatal().Msgf("Directory for downloaded mod files (%q) does not exist and cannot be created: %v",
-				downloadLocation,
-				err)
-		}
-	} else {
-		log.Info().Msgf("Cache at %q is empty, will scan for projects and download mod files", downloadLocation)
+	var cacheFilled bool
 
-		if err := mods.Download(mods.NewGitLabModFetcher(glClient), downloadLocation); err != nil {
+	if info, err := os.Stat(goModDir); err == nil && info.IsDir() {
+		cacheFilled = true // we simply assume the cache is filled in case the cache directory for the mod files exists
+	}
+
+	if err := os.MkdirAll(goModDir, 0o700); err != nil {
+		log.Fatal().Msgf("Directory for downloaded mod files (%q) cannot be accesses and could not be created: %v",
+			goModDir,
+			err)
+	}
+
+	if !cacheFilled {
+		log.Info().Msgf("Cache at %q is empty, will scan for projects and download mod files", goModDir)
+
+		if err := mods.Download(mods.NewGitLabModFetcher(glClient), goModDir); err != nil {
 			log.Fatal().Msgf("Could not download mod files: %v", err)
 		}
 	}
 
-	modFiles, err := mods.ReadModFiles(downloadLocation)
+	modFiles, err := mods.ReadModFiles(goModDir)
 	if err != nil {
 		log.Fatal().Msgf("Could not read mod files: %v", err)
 	}
 
 	depGraph := graph.BuildDependencyGraph(modFiles)
 
-	r := chi.NewRouter()
-
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		renderAndReply := func(graph *graph.DependencyGraph) {
-			// We buffer the output in order to ensure we do not end up with an error half-way
-			buffer := bytes.NewBuffer([]byte{})
-
-			if err := graph.RenderSVG(buffer, cfg.goRegistryPrefix); err != nil {
-				log.Error().Msgf("Failed to serve request: %v", err)
-
-				http.Error(w, "Failed to render graph", http.StatusInternalServerError)
-
-				return
-			}
-
-			w.Header().Set("Content-Type", "image/svg+xml")
-
-			_, _ = w.Write(buffer.Bytes())
-		}
-
-		mod := r.URL.Query().Get("mod")
-
-		if mod == "" {
-			log.Info().Msg("Serving overview graph")
-
-			renderAndReply(depGraph)
-
-			return
-		}
-
-		if centerModule := depGraph.LookupNode(mod); centerModule != nil {
-			log.Info().Msgf("Serving graph for module: %s", mod)
-
-			renderAndReply(depGraph.SubgraphFrom(centerModule))
-
-			return
-		}
-
-		http.Error(w, fmt.Sprintf("%q is not a known module.", mod), http.StatusBadRequest)
-	})
+	mux := http.NewServeMux()
+	mux.Handle("/", NewGraphRenderService(depGraph, cfg.goRegistryPrefix))
 
 	// Take a free port
 	listener, err := net.Listen("tcp", "localhost:0")
@@ -117,7 +90,7 @@ func main() {
 	// TODO: Check whether we need to encode the mod when including it in the URL
 	log.Info().Msgf("Serving at http://localhost:%d/?mod=%s", listener.Addr().(*net.TCPAddr).Port, url.QueryEscape(cfg.homeModule))
 
-	if err := http.Serve(listener, r); err != nil {
+	if err := http.Serve(listener, mux); err != nil {
 		log.Fatal().Msgf("Serving failed: %v", err)
 	}
 }
@@ -126,10 +99,12 @@ func configure() *config {
 	var (
 		baseURL    string
 		homeModule string
+		cleanup    bool
 	)
 
 	flag.StringVar(&baseURL, "gitlab-base-url", "", "GitLab's API Base URL")
 	flag.StringVar(&homeModule, "mod", "", "Show graph of this module instead of giant overview graph")
+	flag.BoolVar(&cleanup, "cleanup", false, "Clean up the cache directory, enforcing all information to be refetched")
 
 	flag.Parse()
 
@@ -157,5 +132,6 @@ func configure() *config {
 		glBaseURL:        baseURL,
 		homeModule:       homeModule,
 		goRegistryPrefix: fmt.Sprintf("%s/", baseURLAsURL.Hostname()),
+		cleanup:          cleanup,
 	}
 }
