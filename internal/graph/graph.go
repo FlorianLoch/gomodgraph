@@ -187,7 +187,7 @@ func (d *DependencyGraph) SubgraphFrom(centerNode *ModuleNode) *DependencyGraph 
 	return NewDependencyGraph(subgraphNodesMap, true)
 }
 
-func (d *DependencyGraph) RenderSVG(writer io.Writer, goRegistryPrefix string) error {
+func (d *DependencyGraph) Render(writer io.Writer, goRegistryPrefix string, format graphviz.Format) error {
 	g := graphviz.New()
 
 	graph, err := g.Graph()
@@ -260,7 +260,7 @@ func (d *DependencyGraph) RenderSVG(writer io.Writer, goRegistryPrefix string) e
 	}
 
 	// Third, let Graphviz do its magic
-	if err := g.Render(graph, graphviz.SVG, writer); err != nil {
+	if err := g.Render(graph, format, writer); err != nil {
 		return fmt.Errorf("rendering SVG: %w", err)
 	}
 
