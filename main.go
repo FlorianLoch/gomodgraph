@@ -32,6 +32,7 @@ type config struct {
 	homeModule       string
 	goRegistryPrefix string
 	cleanup          bool
+	listenAddr       string
 }
 
 func main() {
@@ -80,14 +81,14 @@ func main() {
 	mux := http.NewServeMux()
 	mux.Handle("/", NewGraphRenderService(depGraph, cfg.goRegistryPrefix))
 
-	// Take a free port
-	listener, err := net.Listen("tcp", "localhost:0")
+	// We do this extra work because if port is set to 0 we want to choose a free port automatically
+	listener, err := net.Listen("tcp", cfg.listenAddr)
 	if err != nil {
 		log.Fatal().Msgf("Could not open listener: %v", err)
 	}
 
 	// TODO: Check whether we need to encode the mod when including it in the URL
-	log.Info().Msgf("Serving at http://localhost:%d/?mod=%s", listener.Addr().(*net.TCPAddr).Port, url.QueryEscape(cfg.homeModule))
+	log.Info().Msgf("Serving at http://%s/?mod=%s", listener.Addr().(*net.TCPAddr), url.QueryEscape(cfg.homeModule))
 
 	if err := http.Serve(listener, mux); err != nil {
 		log.Fatal().Msgf("Serving failed: %v", err)
@@ -99,11 +100,13 @@ func configure() *config {
 		baseURL    string
 		homeModule string
 		cleanup    bool
+		listenAddr string
 	)
 
 	flag.StringVar(&baseURL, "gitlab-base-url", "", "GitLab's API Base URL")
 	flag.StringVar(&homeModule, "mod", "", "Show graph of this module instead of giant overview graph")
 	flag.BoolVar(&cleanup, "cleanup", false, "Clean up the cache directory, enforcing all information to be refetched")
+	flag.StringVar(&listenAddr, "listen-addr", "localhost:0", "Listen on the given interface and port, set port to 0 to have a free one chosen automatically")
 
 	flag.Parse()
 
@@ -132,5 +135,6 @@ func configure() *config {
 		homeModule:       homeModule,
 		goRegistryPrefix: fmt.Sprintf("%s/", baseURLAsURL.Hostname()),
 		cleanup:          cleanup,
+		listenAddr:       listenAddr,
 	}
 }
