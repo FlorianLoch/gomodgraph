@@ -25,22 +25,22 @@ func NewGitLabModFetcher(glClient *gitlab.Client) *GitLabModFetcher {
 	}
 }
 
-func (g *GitLabModFetcher) DownloadModFiles(storeModFile StoreModFileFn) error {
+func (g *GitLabModFetcher) ProvideModFilesAndVersions(storeModFile StoreModFileFn) error {
 	projects, err := g.fetchAllProjects()
 	if err != nil {
 		return fmt.Errorf("fetching projects from GitLab: %w", err)
 	}
 
-	log.Info().Msgf("Going to check %d projects for go.mod files", len(projects))
+	log.Info().Msgf("Going to check %d projects for go.mod files and released versions/tags", len(projects))
 
-	if err := g.downloadGoModFiles(projects, storeModFile); err != nil {
-		return fmt.Errorf("downloading Go Mod files: %w", err)
+	if err := g.downloadModFilesAndLookupVersions(projects, storeModFile); err != nil {
+		return fmt.Errorf("fetching module metadata: %w", err)
 	}
 
 	return nil
 }
 
-func (g *GitLabModFetcher) downloadGoModFiles(projects []*gitlab.Project, storeModFile StoreModFileFn) error {
+func (g *GitLabModFetcher) downloadModFilesAndLookupVersions(projects []*gitlab.Project, storeModFile StoreModFileFn) error {
 	var (
 		noErrorCnt, noModFile int64
 		wg                    sync.WaitGroup
@@ -63,7 +63,12 @@ func (g *GitLabModFetcher) downloadGoModFiles(projects []*gitlab.Project, storeM
 				continue
 			}
 
-			if err := storeModFile(project.NameWithNamespace, rawFile); err != nil {
+			version, err := g.latestVersion(project.ID)
+			if err != nil {
+				log.Error().Msgf("Could not get latest version of project %q: %v", project.Name, err)
+			}
+
+			if err := storeModFile(project.NameWithNamespace, version, rawFile); err != nil {
 				log.Error().Msgf("Failed to store mod file: %v", err)
 
 				continue
@@ -118,4 +123,30 @@ func (g *GitLabModFetcher) fetchAllProjects() ([]*gitlab.Project, error) {
 	}
 
 	return allProjects, nil
+}
+
+var (
+	orderByUpdated   = "updated"
+	sortDescending   = "desc"
+	glListTagOptions = &gitlab.ListTagsOptions{
+		ListOptions: gitlab.ListOptions{
+			Page:    1, // first page
+			PerPage: 1,
+		},
+		OrderBy: &orderByUpdated,
+		Sort:    &sortDescending,
+	}
+)
+
+func (g *GitLabModFetcher) latestVersion(projectID int) (string, error) {
+	tags, _, err := g.glClient.Tags.ListTags(projectID, glListTagOptions)
+	if err != nil {
+		return "n.a.", err
+	}
+
+	if len(tags) == 0 {
+		return "", nil
+	}
+
+	return tags[0].Name, nil
 }

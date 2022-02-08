@@ -16,7 +16,6 @@ import (
 	"github.com/florianloch/gomodgraph/internal/mods"
 )
 
-// TODO: Annotate module with the latest version, allows indication whether a used version is outdated
 // TODO: Consider "Replace" directive in go.mod
 // TODO: Add route parameter to request PNG instead of SVG
 

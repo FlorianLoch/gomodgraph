@@ -10,11 +10,13 @@ import (
 	"github.com/goccy/go-graphviz"
 	"github.com/goccy/go-graphviz/cgraph"
 	"github.com/rs/zerolog/log"
-	"golang.org/x/mod/modfile"
+
+	"github.com/florianloch/gomodgraph/internal/mods"
 )
 
 type ModuleNode struct {
 	ModuleName   string
+	Version      string
 	GoModVersion string
 	Requires     []*DependencyVertex
 	RequiredBy   []*DependencyVertex
@@ -31,6 +33,17 @@ func (m *ModuleNode) addDependency(requires *ModuleNode, version string) {
 		targetModule:  m,
 		targetVersion: version,
 	})
+}
+
+func (m *ModuleNode) clone() *ModuleNode {
+	return &ModuleNode{
+		ModuleName:   m.ModuleName,
+		Version:      m.Version,
+		GoModVersion: m.GoModVersion,
+		Requires:     m.Requires,
+		RequiredBy:   m.RequiredBy,
+		Highlight:    m.Highlight,
+	}
 }
 
 type DependencyVertex struct {
@@ -68,11 +81,13 @@ func NewDependencyGraph(modulesMap map[string]*ModuleNode, isSubgraph bool) *Dep
 	}
 }
 
-func BuildDependencyGraph(modFiles []*modfile.File) *DependencyGraph {
+func BuildDependencyGraph(modFiles []*mods.Module) *DependencyGraph {
 	modulesMap := make(map[string]*ModuleNode, len(modFiles))
 
 	// Populate data structures, vertices will be added later-on
-	for _, modFile := range modFiles {
+	for _, module := range modFiles {
+		modFile := module.ModFile
+
 		if modFile.Module == nil {
 			// TODO: Get name of bad module
 			log.Error().Msgf("%q does not contain a module directive", "TODO")
@@ -90,12 +105,15 @@ func BuildDependencyGraph(modFiles []*modfile.File) *DependencyGraph {
 		moduleNode := &ModuleNode{
 			ModuleName:   moduleName,
 			GoModVersion: goVersion,
+			Version:      module.Version,
 		}
 
 		modulesMap[moduleName] = moduleNode
 	}
 
-	for _, modFile := range modFiles {
+	for _, module := range modFiles {
+		modFile := module.ModFile
+
 		if modFile.Module == nil {
 			// Issues with this file have already been logged above
 
@@ -143,30 +161,27 @@ func (d *DependencyGraph) SubgraphFrom(centerNode *ModuleNode) *DependencyGraph 
 
 	// We copy every required module and prune its dependencies
 	for _, dependency := range centerNode.Requires {
-		newNode := &ModuleNode{
-			ModuleName:   dependency.targetModule.ModuleName,
-			GoModVersion: dependency.targetModule.GoModVersion,
-		}
+		cloneModule := dependency.targetModule.clone()
+		cloneModule.Requires = nil
 
-		subgraphNodesMap[dependency.targetModule.ModuleName] = newNode
+		subgraphNodesMap[dependency.targetModule.ModuleName] = cloneModule
 
 		// We also fix this reference because otherwise subgraphNodesMap would not be complete, i.e. there would be
 		// references to nodes not contained in the map. The reference would point to a node not contained in the map
 		// instead of pointing to the node in the map representing the same module.
 		// The rendering implementation depends on the map being complete.
-		dependency.targetModule = newNode
+		dependency.targetModule = cloneModule
 	}
 
 	// We copy every module requiring the given center module and prune all dependencies, except the one to the center node
 	for _, dependency := range centerNode.RequiredBy {
-		subgraphNodesMap[dependency.targetModule.ModuleName] = &ModuleNode{
-			ModuleName:   dependency.targetModule.ModuleName,
-			GoModVersion: dependency.targetModule.GoModVersion,
-			Requires: []*DependencyVertex{{
-				targetModule:  centerNode,
-				targetVersion: dependency.targetVersion,
-			}},
-		}
+		clonedModule := dependency.targetModule.clone()
+		clonedModule.Requires = []*DependencyVertex{{
+			targetModule:  centerNode,
+			targetVersion: dependency.targetVersion,
+		}}
+
+		subgraphNodesMap[dependency.targetModule.ModuleName] = clonedModule
 	}
 
 	return NewDependencyGraph(subgraphNodesMap, true)
@@ -193,7 +208,13 @@ func (d *DependencyGraph) RenderSVG(writer io.Writer, goRegistryPrefix string) e
 			return fmt.Errorf("creating Graphviz node: %w", err)
 		}
 
-		n.SetLabel(fmt.Sprintf("%s\n(%s)", strings.TrimPrefix(moduleNode.ModuleName, goRegistryPrefix), moduleNode.GoModVersion))
+		version := moduleNode.Version
+
+		if version == "" {
+			version = "<no version yet>"
+		}
+
+		n.SetLabel(fmt.Sprintf("%s\n%s (go%s)", strings.TrimPrefix(moduleNode.ModuleName, goRegistryPrefix), version, moduleNode.GoModVersion))
 
 		// We need to fill the node in order to make the whole box a link
 		n.SetStyle(cgraph.FilledNodeStyle)
@@ -224,9 +245,16 @@ func (d *DependencyGraph) RenderSVG(writer io.Writer, goRegistryPrefix string) e
 				return fmt.Errorf("creating Graphviz edge: %w", err)
 			}
 
+			color := "dimgrey"
+
+			// In case the required version is not equal the latest version color the edge differently
+			if dependency.targetVersion != dependency.targetModule.Version && dependency.targetModule.Version != "" {
+				color = "darkorange"
+			}
+
 			e.SetLabel(dependency.targetVersion)
-			e.SetColor("dimgrey")
-			e.SetFontColor("dimgrey")
+			e.SetColor(color)
+			e.SetFontColor(color)
 			e.SetArrowSize(0.5)
 		}
 	}
