@@ -1,7 +1,14 @@
 # gomodgraph
 
 Purpose of this tool is to visualize the dependencies between a given bunch of Go modules.
-Currently, there only is support to retrieve such a set of modules from on-premise GitLab instances.
+
+It will help to answer questions like:
+- Is everyone module using an up-to-date version of module X?
+- Who is using X anyway? Can I safely move it, what could I have missed?
+
+Currently, there only is support to retrieve such a set of modules from an (on-premise) GitLab instance.
+As this tool does not mean to cover all dependencies of a given module (as said, only the relations between modules inside a given set are considered) it works by just using the GitLab API.
+Does not require a Go Proxy etc. to provide further information.
 
 This may not be helpful for projects with external dependencies only, but quite handy for corporate architectures with many Go modules depending on each other.
 
