@@ -90,7 +90,7 @@ func BuildDependencyGraph(modFiles []*mods.Module) *DependencyGraph {
 
 		if modFile.Module == nil {
 			// TODO: Get name of bad module
-			log.Error().Msgf("%q does not contain a module directive", "TODO")
+			log.Error().Msgf("Found a modfile that does not contain a module directive")
 
 			continue
 		}
@@ -115,8 +115,7 @@ func BuildDependencyGraph(modFiles []*mods.Module) *DependencyGraph {
 		modFile := module.ModFile
 
 		if modFile.Module == nil {
-			// Issues with this file have already been logged above
-
+			// Issues with this file will have already been logged above
 			continue
 		}
 

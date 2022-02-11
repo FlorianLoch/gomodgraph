@@ -17,7 +17,6 @@ import (
 )
 
 // TODO: Consider "Replace" directive in go.mod
-// TODO: Add route parameter to request PNG instead of SVG
 
 const (
 	glTokenEnvVar   = "GITLAB_API_TOKEN"
@@ -87,7 +86,6 @@ func main() {
 		log.Fatal().Msgf("Could not open listener: %v", err)
 	}
 
-	// TODO: Check whether we need to encode the mod when including it in the URL
 	log.Info().Msgf("Serving at http://%s/?mod=%s", listener.Addr().(*net.TCPAddr), url.QueryEscape(cfg.homeModule))
 
 	if err := http.Serve(listener, mux); err != nil {
