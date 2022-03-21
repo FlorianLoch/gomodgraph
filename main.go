@@ -2,7 +2,6 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"net"
 	"net/http"
 	"net/url"
@@ -133,7 +132,7 @@ func configure() *config {
 		glToken:          token,
 		glBaseURL:        baseURL,
 		homeModule:       homeModule,
-		goRegistryPrefix: fmt.Sprintf("%s/", baseURLAsURL.Hostname()),
+		goRegistryPrefix: baseURLAsURL.Hostname(),
 		cleanup:          cleanup,
 		listenAddr:       listenAddr,
 	}

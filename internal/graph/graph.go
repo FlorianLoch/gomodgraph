@@ -213,7 +213,7 @@ func (d *DependencyGraph) Render(writer io.Writer, goRegistryPrefix string, form
 			version = "<no version yet>"
 		}
 
-		n.SetLabel(fmt.Sprintf("%s\n%s (go%s)", strings.TrimPrefix(moduleNode.ModuleName, goRegistryPrefix), version, moduleNode.GoModVersion))
+		n.SetLabel(fmt.Sprintf("%s\n%s (go%s)", strings.TrimPrefix(moduleNode.ModuleName, goRegistryPrefix+"/"), version, moduleNode.GoModVersion))
 
 		// We need to fill the node in order to make the whole box a link
 		n.SetStyle(cgraph.FilledNodeStyle)

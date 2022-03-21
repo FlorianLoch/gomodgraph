@@ -50,11 +50,12 @@ func (g *GraphRenderService) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// By this we allow omitting the registry when stating a module.
 		// As this tool focuses on a set of owned modules it is highly unlikely to run into collisions not considering
 		// the registry prefix
+
 		centerModule = g.rootGraph.LookupNode(path.Join(g.goRegistryPrefix, mod))
 	}
 
 	if centerModule != nil {
-		log.Info().Msgf("Serving graph for module: %s", mod)
+		log.Info().Msgf("Serving graph for module: %s", centerModule.ModuleName)
 
 		g.renderAndReply(w, g.rootGraph.SubgraphFrom(centerModule), asPNG)
 
