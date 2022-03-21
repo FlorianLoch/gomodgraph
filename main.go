@@ -43,6 +43,8 @@ func main() {
 		if err := os.RemoveAll(tmpDir); err != nil && !os.IsNotExist(err) {
 			log.Error().Msgf("Failed to remove the tmp dir (%q): %v", tmpDir, err)
 		}
+
+		log.Info().Msg("Emptied cache successfully")
 	}
 
 	glClient, err := gitlab.NewClient(cfg.glToken, gitlab.WithBaseURL(cfg.glBaseURL))
