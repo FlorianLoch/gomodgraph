@@ -42,7 +42,7 @@ go install github.com/florianloch/gomodgraph@latest
 export GITLAB_API_TOKEN = "your token"
 
 # Can also be set as CLI flag
-export GITLAB_BASE_URL = "base url"
+export GITLAB_API_BASE_URL = "base url"
 
 gomodgraph
 

@@ -18,10 +18,11 @@ import (
 // TODO: Consider "Replace" directive in go.mod
 
 const (
-	glTokenEnvVar   = "GITLAB_API_TOKEN"
-	glBaseURLEnvVar = "GITLAB_BASE_URL"
-	tmpDir          = "/tmp/gomodgraph/"
-	goModDir        = tmpDir + "go_mod_files" // has to be below tmpDir
+	glTokenEnvVar           = "GITLAB_API_TOKEN"
+	glBaseURLEnvVar         = "GITLAB_API_BASE_URL"
+	glBaseURLPreviousEnvVar = "GITLAB_BASE_URL"
+	tmpDir                  = "/tmp/gomodgraph/"
+	goModDir                = tmpDir + "go_mod_files" // has to be below tmpDir
 )
 
 type config struct {
@@ -111,6 +112,11 @@ func configure() *config {
 
 	if baseURL == "" {
 		baseURL = os.Getenv(glBaseURLEnvVar)
+
+		// For backwards compatibility also check the old ENV
+		if baseURL == "" {
+			baseURL = os.Getenv(glBaseURLPreviousEnvVar)
+		}
 
 		if baseURL == "" {
 			log.Fatal().Msgf("GitLab's API Base URL is required but neither the flag nor the env variable (%q) is set", glBaseURLEnvVar)
